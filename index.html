@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>X-T50 Link Test</title>
+<style>
+/* Same tokens as the companion app. Single column, phone first. */
+:root {
+  color-scheme: dark;
+  --bg: #0f1011;
+  --surface: #161819;
+  --raised: #1d2022;
+  --border: #2a2e31;
+  --border-strong: #3a3f43;
+  --text: #e7e8e9;
+  --muted: #9aa0a5;
+  --faint: #6c7277;
+  --accent: #e0a43a;
+  --live: #4dbb86;
+  --danger: #e2674f;
+  --radius: 6px;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+[hidden] { display: none !important; }
+main { max-width: 560px; margin: 0 auto; display: grid; gap: 16px;
+  padding-block: max(20px, env(safe-area-inset-top)) max(28px, env(safe-area-inset-bottom));
+  padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+header { display: grid; gap: 4px; }
+h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; text-wrap: balance; }
+.sub { margin: 0; color: var(--muted); font-size: 14px; }
+.tag { justify-self: start; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; color: var(--live); border: 1px solid color-mix(in srgb, var(--live) 50%, transparent); }
+section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; display: grid; gap: 10px; min-width: 0; }
+h2 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--muted); font-size: 14px; }
+ol strong { color: var(--text); font-weight: 600; }
+.warn { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.warn p { margin: 0; font-size: 14px; }
+.warn a { color: var(--accent); }
+.buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+button { font: inherit; font-size: 15px; font-weight: 600; color: var(--text); background: var(--raised); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; }
+button.primary { background: var(--text); color: var(--bg); border-color: var(--text); grid-column: 1 / -1; }
+button:disabled { opacity: .4; cursor: default; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.state { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); flex-shrink: 0; }
+.state[data-s="busy"] .dot { background: var(--accent); animation: pulse 1s infinite; }
+.state[data-s="ok"] .dot { background: var(--live); }
+.state[data-s="fail"] .dot { background: var(--danger); }
+@keyframes pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .state[data-s="busy"] .dot { animation: none; } }
+dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
+dt { color: var(--muted); }
+dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap: anywhere; }
+.svc { display: grid; gap: 2px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; }
+.svc:first-child { border-top: 0; padding-top: 0; }
+.svc b { font-weight: 600; }
+.svc code, .log { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.svc .chars { color: var(--faint); font-size: 12px; }
+.log { margin: 0; white-space: pre-wrap; max-height: 260px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px; }
+.foot { color: var(--faint); font-size: 12px; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="tag">Read-only</span>
+    <h1>X-T50 Link Test</h1>
+    <p class="sub">Checks whether this phone can open a Bluetooth connection to the camera and see its pairing services. It reads two text fields and never writes anything to the camera.</p>
+  </header>
+
+  <section class="warn" id="nobt" hidden>
+    <h2>This browser can't use Bluetooth</h2>
+    <p id="nobt-text"></p>
+  </section>
+
+  <section>
+    <h2>Before you start</h2>
+    <ol>
+      <li>Fully close <strong>XApp</strong>, <strong>Shutter+</strong> and <strong>nRF Connect</strong>.</li>
+      <li>On the camera, open <strong>Pairing Registration</strong>.</li>
+      <li>Tap <strong>Find camera</strong> and pick the X-T50 from the list.</li>
+    </ol>
+  </section>
+
+  <section aria-live="polite">
+    <div class="state" id="state" data-s="idle"><span class="dot"></span><span id="state-text">Not connected</span></div>
+    <div class="buttons">
+      <button class="primary" id="find">Find camera</button>
+      <button id="disconnect" disabled>Disconnect</button>
+      <button id="copy" disabled>Copy report</button>
+    </div>
+  </section>
+
+  <section id="result" hidden>
+    <h2>Result</h2>
+    <dl>
+      <dt>Camera</dt><dd id="r-name">–</dd>
+      <dt>Firmware</dt><dd id="r-fw">–</dd>
+      <dt>Link up after</dt><dd id="r-connect">–</dd>
+      <dt>Services after</dt><dd id="r-services">–</dd>
+      <dt>Pairing mode</dt><dd id="r-mode">–</dd>
+    </dl>
+  </section>
+
+  <section id="svc-box" hidden>
+    <h2>Services found</h2>
+    <div id="svc-list"></div>
+  </section>
+
+  <section>
+    <h2>Timeline</h2>
+    <pre class="log" id="log">Waiting.</pre>
+  </section>
+
+  <p class="foot">The report leaves out Bluetooth addresses, tokens and Wi-Fi details. The Wi-Fi name and password fields are never read.</p>
+</main>
+
+<script>
+"use strict";
+// UUIDs from wireless/bluetooth.py (adapted from libfuji, MIT).
+const SVC = {
+  "91f1de68-dff6-466e-8b65-ff13b0f16fb8": "Legacy pairing",
+  "123d8f06-62a1-4935-9322-833c531ee225": "Secure pairing",
+  "00001800-0000-1000-8000-00805f9b34fb": "Generic Access",
+  "00001801-0000-1000-8000-00805f9b34fb": "Generic Attribute",
+  "0000180a-0000-1000-8000-00805f9b34fb": "Device Information",
+  "0000180f-0000-1000-8000-00805f9b34fb": "Battery",
+};
+// The only characteristics this page reads. Everything else is listed, never touched.
+const READ_ONLY = {
+  "00002a00-0000-1000-8000-00805f9b34fb": "name",
+  "00002a26-0000-1000-8000-00805f9b34fb": "firmware",
+};
+const FUJI_COMPANY = 0x04D8;
+
+const $ = id => document.getElementById(id);
+let device = null, t0 = 0, report = null;
+
+function log(line) {
+  const t = t0 ? ((performance.now() - t0) / 1000).toFixed(2).padStart(6) + "s  " : "";
+  const el = $("log");
+  el.textContent = (el.textContent === "Waiting." ? "" : el.textContent + "\n") + t + line;
+  el.scrollTop = el.scrollHeight;
+  if (report) report.timeline.push({ t: t0 ? +((performance.now() - t0) / 1000).toFixed(2) : 0, event: line });
+}
+function setState(s, text) { $("state").dataset.s = s; $("state-text").textContent = text; }
+function secs() { return ((performance.now() - t0) / 1000).toFixed(1) + " s"; }
+function errText(e) { return (e && (e.name ? e.name + ": " : "") + (e.message || "")) || String(e); }
+function withTimeout(promise, ms, what) {
+  return Promise.race([promise, new Promise((_, no) => setTimeout(() => no(new Error(what + " got no reply in " + ms / 1000 + " s")), ms))]);
+}
+function decode(view) {
+  const bytes = new Uint8Array(view.buffer, view.byteOffset, Math.min(view.byteLength, 64));
+  const end = bytes.indexOf(0);
+  return new TextDecoder().decode(end < 0 ? bytes : bytes.slice(0, end)).trim();
+}
+function props(c) {
+  const p = c.properties;
+  return ["read", "write", "writeWithoutResponse", "notify", "indicate"].filter(k => p[k]).join(", ") || "none";
+}
+
+function checkSupport() {
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && "ontouchend" in document);
+  if (navigator.bluetooth && navigator.bluetooth.requestDevice) return true;
+  $("nobt").hidden = false;
+  $("nobt-text").innerHTML = ios
+    ? 'Safari and Chrome on iPhone don\'t support Web Bluetooth. Install the free <a href="https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055">Bluefy</a> browser from the App Store and open this same address in it.'
+    : (window.isSecureContext ? "Open this page in Chrome on Android, or in Chrome or Edge on a computer."
+       : "This page has to be opened over https for Bluetooth to work.");
+  $("find").disabled = true;
+  return false;
+}
+
+async function find() {
+  $("find").disabled = true;
+  $("svc-list").textContent = ""; $("svc-box").hidden = true; $("result").hidden = true;
+  for (const id of ["r-name", "r-fw", "r-connect", "r-services", "r-mode"]) $(id).textContent = "–";
+  $("log").textContent = "Waiting.";
+  t0 = 0;
+  report = { tool: "X-T50 Link Test", read_only: true, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
+  const optionalServices = Object.keys(SVC);
+  setState("busy", "Choose the camera in the list");
+  try {
+    try {
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ manufacturerData: [{ companyIdentifier: FUJI_COMPANY }] }, { namePrefix: "X-" }],
+        optionalServices, optionalManufacturerData: [FUJI_COMPANY],
+      });
+    } catch (e) {
+      if (e.name !== "TypeError") throw e;
+      // Some browsers (older Bluefy) don't know manufacturer filters: fall back to the name.
+      device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "X-" }], optionalServices });
+    }
+  } catch (e) {
+    setState("idle", e.name === "NotFoundError" ? "No camera chosen" : "Couldn't scan");
+    log(e.name === "NotFoundError" ? "Picker closed without choosing a camera." : "Scan failed. " + errText(e));
+    $("find").disabled = false; $("copy").disabled = false;
+    return;
+  }
+  report.picked_name = device.name || "unnamed";
+  device.addEventListener("gattserverdisconnected", () => {
+    log("Camera link dropped.");
+    if ($("state").dataset.s !== "fail") setState("idle", "Disconnected");
+    $("disconnect").disabled = true; $("find").disabled = false;
+  });
+  t0 = performance.now();
+  log("Picked " + (device.name || "an unnamed device") + ". Connecting.");
+  setState("busy", "Connecting to " + (device.name || "camera"));
+  $("disconnect").disabled = false;
+  $("result").hidden = false;
+  try {
+    const server = await withTimeout(device.gatt.connect(), 30000, "Connect");
+    $("r-connect").textContent = report.connect_seconds = secs();
+    log("Link up. Asking for services.");
+    setState("busy", "Connected, listing services");
+    const services = await withTimeout(server.getPrimaryServices(), 30000, "Service list");
+    $("r-services").textContent = report.services_seconds = secs();
+    log("Camera answered with " + services.length + " service(s).");
+    report.services = [];
+    const uuids = services.map(s => s.uuid);
+    const legacy = uuids.includes("91f1de68-dff6-466e-8b65-ff13b0f16fb8");
+    const secure = uuids.includes("123d8f06-62a1-4935-9322-833c531ee225");
+    $("r-mode").textContent = report.pairing_mode = legacy ? "Legacy (91F1DE68)" : secure ? "Secure (123D8F06)" : "No pairing service seen";
+    for (const s of services) {
+      const entry = { uuid: s.uuid, label: SVC[s.uuid] || "Other", characteristics: [] };
+      try {
+        const chars = await withTimeout(s.getCharacteristics(), 10000, "Characteristic list");
+        for (const c of chars) {
+          entry.characteristics.push({ uuid: c.uuid, properties: props(c) });
+          const field = READ_ONLY[c.uuid];
+          if (field && c.properties.read) {
+            try {
+              const value = decode(await withTimeout(c.readValue(), 8000, "Read " + field));
+              report[field] = value;
+              $(field === "name" ? "r-name" : "r-fw").textContent = value || "empty";
+              log("Read " + field + ": " + value);
+            } catch (e) { log("Couldn't read " + field + ". " + errText(e)); }
+          }
+        }
+      } catch (e) { entry.error = errText(e); log("Couldn't list characteristics of " + entry.label + ". " + errText(e)); }
+      report.services.push(entry);
+      const div = document.createElement("div");
+      div.className = "svc";
+      div.innerHTML = "<b></b><code></code><span class=\"chars\"></span>";
+      div.children[0].textContent = entry.label;
+      div.children[1].textContent = s.uuid;
+      div.children[2].textContent = entry.error ? "Characteristics unavailable" : entry.characteristics.length + " characteristic(s)";
+      $("svc-list").append(div);
+    }
+    $("svc-box").hidden = false;
+    report.outcome = "connected_and_listed";
+    setState("ok", "Connected. Services listed in " + report.services_seconds);
+    log("Done. Nothing was written to the camera.");
+  } catch (e) {
+    report.outcome = "failed"; report.error = errText(e);
+    setState("fail", "Failed: " + errText(e));
+    log("Stopped. " + errText(e));
+    try { device.gatt.disconnect(); } catch (_) {}
+  }
+  $("copy").disabled = false;
+  $("find").disabled = false;
+}
+
+function disconnect() {
+  if (device && device.gatt.connected) { device.gatt.disconnect(); log("Disconnected by you."); }
+  setState("idle", "Disconnected");
+  $("disconnect").disabled = true; $("find").disabled = false;
+}
+
+async function copy() {
+  const text = JSON.stringify(report, null, 2);
+  try { await navigator.clipboard.writeText(text); $("copy").textContent = "Copied"; }
+  catch (_) {
+    $("log").textContent = text;
+    const r = document.createRange(); r.selectNodeContents($("log"));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    $("copy").textContent = "Selected below";
+  }
+  setTimeout(() => { $("copy").textContent = "Copy report"; }, 2000);
+}
+
+$("find").addEventListener("click", find);
+$("disconnect").addEventListener("click", disconnect);
+$("copy").addEventListener("click", copy);
+checkSupport();
+</script>
+</body>
+</html>
