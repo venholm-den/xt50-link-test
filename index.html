@@ -69,7 +69,7 @@ dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap:
 <body>
 <main>
   <header>
-    <span class="tag">Read-only until you register · v3</span>
+    <span class="tag">Read-only until you register · v4</span>
     <h1>X-T50 Link Test</h1>
     <p class="sub">Checks whether this phone can open a Bluetooth connection to the camera and see its pairing services. Finding and connecting only reads from the camera. Registering is a separate step that you confirm first.</p>
   </header>
@@ -202,13 +202,33 @@ function captureToken(dev) {
       stop.abort();
       resolve(value);
     };
+    // Diagnostics only: counts, company ids, lengths and the first byte. The code itself is never logged.
+    const seen = { adverts: 0, companies: [], fuji_lengths: [], fuji_first_bytes: [], service_data: 0 };
+    report.broadcast = seen;
     const onAdvert = e => {
-      const d = e.manufacturerData && e.manufacturerData.get(FUJI_COMPANY);
-      if (d && d.byteLength >= 5 && d.getUint8(0) === 2) finish(new Uint8Array(d.buffer, d.byteOffset + 1, 4).slice());
+      seen.adverts++;
+      if (e.serviceData && e.serviceData.size) seen.service_data++;
+      const m = e.manufacturerData;
+      if (!m) return;
+      for (const [company, d] of m) {
+        const hex = "0x" + Number(company).toString(16).padStart(4, "0");
+        if (!seen.companies.includes(hex)) seen.companies.push(hex);
+        if (Number(company) !== FUJI_COMPANY) continue;
+        let bytes = new Uint8Array(d.buffer, d.byteOffset, d.byteLength);
+        // Some browsers keep the company id at the front of the data.
+        if (bytes.length >= 7 && bytes[0] === 0xd8 && bytes[1] === 0x04) bytes = bytes.subarray(2);
+        if (!seen.fuji_lengths.includes(bytes.length)) seen.fuji_lengths.push(bytes.length);
+        if (bytes.length && !seen.fuji_first_bytes.includes(bytes[0])) seen.fuji_first_bytes.push(bytes[0]);
+        if (bytes.length >= 5 && bytes[0] === 2) finish(bytes.slice(1, 5));
+      }
     };
     dev.addEventListener("advertisementreceived", onAdvert);
     dev.watchAdvertisements({ signal: stop.signal }).catch(e => { log("Couldn't listen to the camera's broadcast. " + errText(e)); finish(null); });
-    setTimeout(() => finish(null), 6000);
+    setTimeout(() => {
+      if (!done) log("Heard " + seen.adverts + " broadcast(s) in 8 s. Company ids: " + (seen.companies.join(", ") || "none") +
+        ". Fujifilm data lengths: " + (seen.fuji_lengths.join(", ") || "none") + ".");
+      finish(null);
+    }, 8000);
   });
 }
 
@@ -285,7 +305,7 @@ async function find() {
   for (const id of ["r-name", "r-fw", "r-connect", "r-services", "r-mode"]) $(id).textContent = "–";
   $("log").textContent = "Waiting.";
   t0 = 0;
-  report = { tool: "X-T50 Link Test", version: 3, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
+  report = { tool: "X-T50 Link Test", version: 4, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
   const optionalServices = Object.keys(SVC);
   setState("busy", "Choose the camera in the list");
   try {
@@ -297,6 +317,7 @@ async function find() {
     } catch (e) {
       if (e.name !== "TypeError") throw e;
       // Some browsers (older Bluefy) don't know manufacturer filters: fall back to the name.
+      report.picker = "name filter only";
       device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "X-" }], optionalServices });
     }
   } catch (e) {
