@@ -157,6 +157,11 @@ function decode(view) {
   const end = bytes.indexOf(0);
   return new TextDecoder().decode(end < 0 ? bytes : bytes.slice(0, end)).trim();
 }
+// Bluefy reports UUIDs in upper case and 16-bit ones in short form ("180A").
+function norm(u) {
+  u = String(u).toLowerCase();
+  return /^[0-9a-f]{4}$/.test(u) ? "0000" + u + "-0000-1000-8000-00805f9b34fb" : u;
+}
 function props(c) {
   const p = c.properties;
   return ["read", "write", "writeWithoutResponse", "notify", "indicate"].filter(k => p[k]).join(", ") || "none";
@@ -221,17 +226,17 @@ async function find() {
     $("r-services").textContent = report.services_seconds = secs();
     log("Camera answered with " + services.length + " service(s).");
     report.services = [];
-    const uuids = services.map(s => s.uuid);
+    const uuids = services.map(s => norm(s.uuid));
     const legacy = uuids.includes("91f1de68-dff6-466e-8b65-ff13b0f16fb8");
     const secure = uuids.includes("123d8f06-62a1-4935-9322-833c531ee225");
     $("r-mode").textContent = report.pairing_mode = legacy ? "Legacy (91F1DE68)" : secure ? "Secure (123D8F06)" : "No pairing service seen";
     for (const s of services) {
-      const entry = { uuid: s.uuid, label: SVC[s.uuid] || "Other", characteristics: [] };
+      const entry = { uuid: s.uuid, label: SVC[norm(s.uuid)] || "Other", characteristics: [] };
       try {
         const chars = await withTimeout(s.getCharacteristics(), 10000, "Characteristic list");
         for (const c of chars) {
           entry.characteristics.push({ uuid: c.uuid, properties: props(c) });
-          const field = READ_ONLY[c.uuid];
+          const field = READ_ONLY[norm(c.uuid)];
           if (field && c.properties.read) {
             try {
               const value = decode(await withTimeout(c.readValue(), 8000, "Read " + field));
