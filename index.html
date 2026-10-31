@@ -78,7 +78,7 @@ button.inline { padding: 4px 10px; font-size: 13px; margin-left: 6px; }
 <body>
 <main>
   <header>
-    <span class="tag">Read-only until you register · v9</span>
+    <span class="tag">Read-only until you register · v10</span>
     <h1>X-T50 Link Test</h1>
     <p class="sub">Checks whether this phone can open a Bluetooth connection to the camera and see its pairing services. Finding and connecting only reads from the camera. Registering is a separate step that you confirm first.</p>
   </header>
@@ -201,10 +201,13 @@ async function startWifi() {
     const hand = await withTimeout(server.getPrimaryService(HANDOFF_SVC), 8000, "Handoff service");
     await withTimeout(write(await hand.getCharacteristic(HANDOFF_CHR), new Uint8Array([4, 0])), 8000, "Wi-Fi start");
     log("Asked the camera to start its Wi-Fi.");
-    wifiPass = decode(await withTimeout((await svc.getCharacteristic(PASS_CHR)).readValue(), 8000, "Password"));
-    if (wifiPass.length < 8) throw new Error("The camera didn't report a Wi-Fi password.");
+    // The X-T50 (firmware 1.12) runs an open network here and refuses the password read.
+    try { wifiPass = decode(await withTimeout((await svc.getCharacteristic(PASS_CHR)).readValue(), 8000, "Password")); }
+    catch (e) { wifiPass = null; log("No password to read. The camera's network is probably open."); }
     $("wifi-ssid").textContent = ssid;
-    $("wifi-pass").textContent = "••••••••"; $("wifi-show").textContent = "Show";
+    const open = !wifiPass || wifiPass.length < 8;
+    $("wifi-pass").textContent = open ? "None needed (open network)" : "••••••••";
+    $("wifi-show").hidden = open; $("wifi-show").textContent = "Show";
     $("wifi-creds").hidden = false;
     report.wifi_started = true;
     setState("ok", "Camera Wi-Fi is on. Join it from the PC.");
@@ -417,7 +420,7 @@ async function find() {
   for (const id of ["r-name", "r-fw", "r-connect", "r-services", "r-mode"]) $(id).textContent = "–";
   $("log").textContent = "Waiting.";
   t0 = 0;
-  report = { tool: "X-T50 Link Test", version: 9, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
+  report = { tool: "X-T50 Link Test", version: 10, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
   const optionalServices = Object.keys(SVC);
   setState("busy", "Choose the camera in the list");
   try {
