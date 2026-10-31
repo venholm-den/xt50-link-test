@@ -60,15 +60,18 @@ dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap:
 .svc code, .log { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .svc .chars { color: var(--faint); font-size: 12px; }
 .log { margin: 0; white-space: pre-wrap; max-height: 260px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px; }
+.note, .confirm p { margin: 0; font-size: 14px; color: var(--muted); }
+.confirm { display: grid; gap: 10px; }
+.confirm strong { color: var(--text); }
 .foot { color: var(--faint); font-size: 12px; margin: 0; }
 </style>
 </head>
 <body>
 <main>
   <header>
-    <span class="tag">Read-only</span>
+    <span class="tag">Read-only until you register</span>
     <h1>X-T50 Link Test</h1>
-    <p class="sub">Checks whether this phone can open a Bluetooth connection to the camera and see its pairing services. It reads two text fields and never writes anything to the camera.</p>
+    <p class="sub">Checks whether this phone can open a Bluetooth connection to the camera and see its pairing services. Finding and connecting only reads from the camera. Registering is a separate step that you confirm first.</p>
   </header>
 
   <section class="warn" id="nobt" hidden>
@@ -105,6 +108,16 @@ dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap:
     </dl>
   </section>
 
+  <section id="reg" hidden>
+    <h2>Register this phone</h2>
+    <p class="note" id="reg-text"></p>
+    <div class="buttons" id="reg-start-row"><button class="primary" id="reg-start">Register with camera</button></div>
+    <div class="confirm" id="reg-confirm" hidden>
+      <p>This sends the camera's own pairing code back to it, plus the name <strong>Fuji Companion Lab</strong>. The camera then asks you to confirm. Your XApp and Shutter+ registrations stay as they are, and nothing else on the camera changes.</p>
+      <div class="buttons"><button class="primary" id="reg-send">Send registration</button><button id="reg-cancel">Cancel</button></div>
+    </div>
+  </section>
+
   <section id="svc-box" hidden>
     <h2>Services found</h2>
     <div id="svc-list"></div>
@@ -115,7 +128,7 @@ dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap:
     <pre class="log" id="log">Waiting.</pre>
   </section>
 
-  <p class="foot">The report leaves out Bluetooth addresses, tokens and Wi-Fi details. The Wi-Fi name and password fields are never read.</p>
+  <p class="foot">The report leaves out Bluetooth addresses, the pairing code and Wi-Fi details. The Wi-Fi name and password fields are never read, and the pairing code is only kept in memory until it is sent.</p>
 </main>
 
 <script>
@@ -128,6 +141,7 @@ const SVC = {
   "00001801-0000-1000-8000-00805f9b34fb": "Generic Attribute",
   "0000180a-0000-1000-8000-00805f9b34fb": "Device Information",
   "0000180f-0000-1000-8000-00805f9b34fb": "Battery",
+  "4c0020fe-f3b6-40de-acc9-77d129067b14": "Camera status",
 };
 // The only characteristics this page reads. Everything else is listed, never touched.
 const READ_ONLY = {
@@ -135,9 +149,16 @@ const READ_ONLY = {
   "00002a26-0000-1000-8000-00805f9b34fb": "firmware",
 };
 const FUJI_COMPANY = 0x04D8;
+// Registration writes, matching wireless/bluetooth.py. Nothing else is ever written.
+const PAIR_SVC = "91f1de68-dff6-466e-8b65-ff13b0f16fb8";
+const PAIR_TOKEN = "aba356eb-9633-4e60-b73f-f52516dbd671";
+const CLIENT_NAME = "85b9163e-62d1-49ff-a6f5-054b4630d4a1";
+const STATUS_SVC = "4c0020fe-f3b6-40de-acc9-77d129067b14";
+const STATUS_CHARS = ["a68e3f66-0fcc-4395-8d4c-aa980b5877fa", "bd17ba04-b76b-4892-a545-b73ba1f74dae",
+                      "f9150137-5d40-4801-a8dc-f7fc5b01da50"];
 
 const $ = id => document.getElementById(id);
-let device = null, t0 = 0, report = null;
+let device = null, server = null, token = null, t0 = 0, report = null;
 
 function log(line) {
   const t = t0 ? ((performance.now() - t0) / 1000).toFixed(2).padStart(6) + "s  " : "";
@@ -167,6 +188,84 @@ function props(c) {
   return ["read", "write", "writeWithoutResponse", "notify", "indicate"].filter(k => p[k]).join(", ") || "none";
 }
 
+// The camera broadcasts a 4-byte pairing code (manufacturer data starting 0x02) while
+// Pairing Registration is open. It stays in memory only and never reaches the page or report.
+function captureToken(dev) {
+  if (!dev.watchAdvertisements) { log("This browser can't read the camera's broadcast, so registration won't be possible."); return Promise.resolve(null); }
+  return new Promise(resolve => {
+    const stop = new AbortController();
+    let done = false;
+    const finish = value => {
+      if (done) return;
+      done = true;
+      dev.removeEventListener("advertisementreceived", onAdvert);
+      stop.abort();
+      resolve(value);
+    };
+    const onAdvert = e => {
+      const d = e.manufacturerData && e.manufacturerData.get(FUJI_COMPANY);
+      if (d && d.byteLength >= 5 && d.getUint8(0) === 2) finish(new Uint8Array(d.buffer, d.byteOffset + 1, 4).slice());
+    };
+    dev.addEventListener("advertisementreceived", onAdvert);
+    dev.watchAdvertisements({ signal: stop.signal }).catch(e => { log("Couldn't listen to the camera's broadcast. " + errText(e)); finish(null); });
+    setTimeout(() => finish(null), 6000);
+  });
+}
+
+function showRegistration(legacy, secure) {
+  $("reg").hidden = false; $("reg-confirm").hidden = true; $("reg-start-row").hidden = false;
+  const ready = legacy && token;
+  $("reg-start").disabled = !ready;
+  $("reg-text").textContent = ready ? "The camera is in Pairing Registration and sent its pairing code. You can register this phone."
+    : legacy ? "The camera's pairing code wasn't picked up. Check that Pairing Registration is open on the camera, then tap Find camera again."
+    : secure ? "This camera asked for secure pairing, which this page doesn't support yet."
+    : "No pairing service was found, so this phone can't register.";
+}
+
+async function write(c, bytes) {
+  return c.writeValueWithResponse ? c.writeValueWithResponse(bytes) : c.writeValue(bytes);
+}
+
+async function register() {
+  $("reg-send").disabled = $("reg-cancel").disabled = true;
+  setState("busy", "Registering");
+  try {
+    if (!server || !server.connected || !token || token.length !== 4) throw new Error("The camera link or pairing code is gone. Tap Find camera again.");
+    const pair = await withTimeout(server.getPrimaryService(PAIR_SVC), 10000, "Pairing service");
+    log("Sending the pairing code.");
+    await withTimeout(write(await pair.getCharacteristic(PAIR_TOKEN), token), 10000, "Pairing code write");
+    token = null;
+    log("Sending the name Fuji Companion Lab.");
+    await withTimeout(write(await pair.getCharacteristic(CLIENT_NAME), new TextEncoder().encode("Fuji Companion Lab")), 10000, "Name write");
+    try {
+      const status = await withTimeout(server.getPrimaryService(STATUS_SVC), 10000, "Status service");
+      for (const id of STATUS_CHARS) {
+        try {
+          const c = await status.getCharacteristic(id);
+          c.addEventListener("characteristicvaluechanged", e => {
+            const v = new Uint8Array(e.target.value.buffer, e.target.value.byteOffset, Math.min(2, e.target.value.byteLength));
+            log("Camera status " + id.slice(0, 8) + ": " + [...v].map(b => b.toString(16).padStart(2, "0")).join(" "));
+          });
+          await withTimeout(c.startNotifications(), 8000, "Status updates");
+        } catch (e) { log("Status updates from " + id.slice(0, 8) + " unavailable. " + errText(e)); }
+      }
+    } catch (e) { log("Camera status service unavailable. " + errText(e)); }
+    report.registration = "sent";
+    setState("ok", "Registration sent. Confirm it on the camera.");
+    log("Registration sent. Confirm on the camera, then keep this page open for a few seconds.");
+    $("reg-text").textContent = "Sent. The camera should now ask you to confirm Fuji Companion Lab.";
+    $("reg-confirm").hidden = true;
+  } catch (e) {
+    report.registration = "failed: " + errText(e);
+    setState("fail", "Registration failed: " + errText(e));
+    log("Registration stopped. " + errText(e));
+    $("reg-confirm").hidden = true; $("reg-start-row").hidden = false;
+  }
+  token = null;
+  $("reg-start").disabled = true;
+  $("reg-send").disabled = $("reg-cancel").disabled = false;
+}
+
 function checkSupport() {
   const ua = navigator.userAgent;
   const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && "ontouchend" in document);
@@ -182,7 +281,7 @@ function checkSupport() {
 
 async function find() {
   $("find").disabled = true;
-  $("svc-list").textContent = ""; $("svc-box").hidden = true; $("result").hidden = true;
+  $("svc-list").textContent = ""; $("svc-box").hidden = true; $("reg").hidden = true; $("result").hidden = true;
   for (const id of ["r-name", "r-fw", "r-connect", "r-services", "r-mode"]) $(id).textContent = "–";
   $("log").textContent = "Waiting.";
   t0 = 0;
@@ -207,18 +306,25 @@ async function find() {
     return;
   }
   report.picked_name = device.name || "unnamed";
+  token = null;
+  setState("busy", "Listening for the camera's pairing code");
+  token = await captureToken(device);
+  report.pairing_code_seen = !!token;
+  log(token ? "Pairing code seen in the camera's broadcast." : "No pairing code seen in the camera's broadcast.");
   device.addEventListener("gattserverdisconnected", () => {
     log("Camera link dropped.");
     if ($("state").dataset.s !== "fail") setState("idle", "Disconnected");
     $("disconnect").disabled = true; $("find").disabled = false;
+    $("reg").hidden = true; token = null;
   });
   t0 = performance.now();
   log("Picked " + (device.name || "an unnamed device") + ". Connecting.");
   setState("busy", "Connecting to " + (device.name || "camera"));
   $("disconnect").disabled = false;
   $("result").hidden = false;
+  $("r-name").textContent = device.name || "–";
   try {
-    const server = await withTimeout(device.gatt.connect(), 30000, "Connect");
+    server = await withTimeout(device.gatt.connect(), 30000, "Connect");
     $("r-connect").textContent = report.connect_seconds = secs();
     log("Link up. Asking for services.");
     setState("busy", "Connected, listing services");
@@ -258,8 +364,9 @@ async function find() {
     }
     $("svc-box").hidden = false;
     report.outcome = "connected_and_listed";
+    showRegistration(legacy, secure);
     setState("ok", "Connected. Services listed in " + report.services_seconds);
-    log("Done. Nothing was written to the camera.");
+    log("Done. Nothing has been written to the camera.");
   } catch (e) {
     report.outcome = "failed"; report.error = errText(e);
     setState("fail", "Failed: " + errText(e));
@@ -274,6 +381,7 @@ function disconnect() {
   if (device && device.gatt.connected) { device.gatt.disconnect(); log("Disconnected by you."); }
   setState("idle", "Disconnected");
   $("disconnect").disabled = true; $("find").disabled = false;
+  $("reg").hidden = true; token = null;
 }
 
 async function copy() {
@@ -291,6 +399,9 @@ async function copy() {
 $("find").addEventListener("click", find);
 $("disconnect").addEventListener("click", disconnect);
 $("copy").addEventListener("click", copy);
+$("reg-start").addEventListener("click", () => { $("reg-start-row").hidden = true; $("reg-confirm").hidden = false; });
+$("reg-cancel").addEventListener("click", () => { $("reg-confirm").hidden = true; $("reg-start-row").hidden = false; });
+$("reg-send").addEventListener("click", register);
 checkSupport();
 </script>
 </body>
