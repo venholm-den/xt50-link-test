@@ -303,6 +303,7 @@ async function write(c, bytes) {
 async function register() {
   $("reg-send").disabled = $("reg-cancel").disabled = true;
   setState("busy", "Registering");
+  timeSent = false;
   try {
     if (!server || !server.connected || !token || token.length !== 4) throw new Error("The camera link or pairing code is gone. Tap Find camera again.");
     const pair = await withTimeout(server.getPrimaryService(PAIR_SVC), 10000, "Pairing service");
@@ -335,7 +336,6 @@ async function register() {
       }
     } catch (e) { log("Camera status service unavailable. " + errText(e)); }
     report.registration = "sent";
-    timeSent = false;
     setState("ok", "Registration sent. Confirm it on the camera.");
     log("Registration sent. Confirm on the camera, then keep this page open for a few seconds.");
     $("reg-text").textContent = "Sent. The camera should now ask you to confirm Fuji Companion Lab.";
