@@ -76,7 +76,7 @@ dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap:
 <body>
 <main>
   <header>
-    <span class="tag">Read-only until you register · v5</span>
+    <span class="tag">Read-only until you register · v6</span>
     <h1>X-T50 Link Test</h1>
     <p class="sub">Checks whether this phone can open a Bluetooth connection to the camera and see its pairing services. Finding and connecting only reads from the camera. Registering is a separate step that you confirm first.</p>
   </header>
@@ -181,7 +181,10 @@ function log(line) {
 }
 function setState(s, text) { $("state").dataset.s = s; $("state-text").textContent = text; }
 function secs() { return ((performance.now() - t0) / 1000).toFixed(1) + " s"; }
-function errText(e) { return (e && (e.name ? e.name + ": " : "") + (e.message || "")) || String(e); }
+function errText(e) {
+  if (e && typeof e === "object" && (e.name || e.message)) return (e.name ? e.name + ": " : "") + (e.message || "");
+  return "browser error " + String(e);
+}
 function withTimeout(promise, ms, what) {
   return Promise.race([promise, new Promise((_, no) => setTimeout(() => no(new Error(what + " got no reply in " + ms / 1000 + " s")), ms))]);
 }
@@ -307,6 +310,7 @@ async function register() {
     $("reg-text").textContent = "Sent. The camera should now ask you to confirm Fuji Companion Lab.";
     $("reg-confirm").hidden = true;
   } catch (e) {
+    if (server && !server.connected) log("The camera closed the link during registration. It usually does this when it rejects the pairing code.");
     report.registration = "failed: " + errText(e);
     setState("fail", "Registration failed: " + errText(e));
     log("Registration stopped. " + errText(e));
@@ -336,7 +340,7 @@ async function find() {
   for (const id of ["r-name", "r-fw", "r-connect", "r-services", "r-mode"]) $(id).textContent = "–";
   $("log").textContent = "Waiting.";
   t0 = 0;
-  report = { tool: "X-T50 Link Test", version: 5, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
+  report = { tool: "X-T50 Link Test", version: 6, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
   const optionalServices = Object.keys(SVC);
   setState("busy", "Choose the camera in the list");
   try {
@@ -360,7 +364,8 @@ async function find() {
   report.picked_name = device.name || "unnamed";
   token = null;
   setState("busy", "Listening for the camera's pairing code");
-  token = await captureToken(device);
+  // Bluefy never passes the broadcast data, so skip the wait when a code was pasted.
+  token = $("code").value.trim() ? null : await captureToken(device);
   report.pairing_code_seen = !!token;
   log(token ? "Pairing code seen in the camera's broadcast." : "No pairing code seen in the camera's broadcast.");
   if (!token && $("code").value.trim()) {
