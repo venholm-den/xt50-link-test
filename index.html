@@ -76,7 +76,7 @@ dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap:
 <body>
 <main>
   <header>
-    <span class="tag">Read-only until you register · v7</span>
+    <span class="tag">Read-only until you register · v8</span>
     <h1>X-T50 Link Test</h1>
     <p class="sub">Checks whether this phone can open a Bluetooth connection to the camera and see its pairing services. Finding and connecting only reads from the camera. Registering is a separate step that you confirm first.</p>
   </header>
@@ -172,6 +172,23 @@ const STATUS_CHARS = ["a68e3f66-0fcc-4395-8d4c-aa980b5877fa", "bd17ba04-b76b-489
                       "f9150137-5d40-4801-a8dc-f7fc5b01da50", "ad06c7b7-f41a-46f4-a29a-712055319122",
                       "049ec406-ef75-4205-a390-08fe209c51f0"];
 const NOT1 = "f9150137-5d40-4801-a8dc-f7fc5b01da50", GEO = "ad06c7b7-f41a-46f4-a29a-712055319122";
+// When NOT1 reports 01 00 the camera asks for the date and time (libfuji device_callback).
+// Approved by Kyle on 2026-10-31: the phone's local time, nothing else.
+const TIME_SVC = "e872b11f-d526-4ae1-9bb4-89a99d48fa59", TIME_CHR = "b9bfd37f-ccad-4d36-a1ee-018e792b3edf";
+let timeSent = false;
+async function sendTime() {
+  if (timeSent || !server || !server.connected) return;
+  timeSent = true;
+  const d = new Date(), b = new Uint8Array(7);
+  new DataView(b.buffer).setUint16(0, d.getFullYear(), true);
+  b.set([d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()], 2);
+  try {
+    const c = await (await server.getPrimaryService(TIME_SVC)).getCharacteristic(TIME_CHR);
+    await withTimeout(write(c, b), 8000, "Time write");
+    report.time_sent = true;
+    log("Sent the phone's date and time, as the camera asked.");
+  } catch (e) { report.time_sent = "failed: " + errText(e); log("Couldn't send the time. " + errText(e)); }
+}
 
 const $ = id => document.getElementById(id);
 let device = null, server = null, token = null, t0 = 0, report = null;
@@ -310,6 +327,7 @@ async function register() {
               setState("ok", "The camera reports pairing is complete.");
               log("The camera reports pairing is complete.");
             }
+            if (id === NOT1 && hex === "01 00") sendTime();
             if (id === GEO && hex === "01 00") log("The camera asked for a location. This page doesn't send one.");
           });
           await withTimeout(c.startNotifications(), 8000, "Status updates");
@@ -317,6 +335,7 @@ async function register() {
       }
     } catch (e) { log("Camera status service unavailable. " + errText(e)); }
     report.registration = "sent";
+    timeSent = false;
     setState("ok", "Registration sent. Confirm it on the camera.");
     log("Registration sent. Confirm on the camera, then keep this page open for a few seconds.");
     $("reg-text").textContent = "Sent. The camera should now ask you to confirm Fuji Companion Lab.";
@@ -352,7 +371,7 @@ async function find() {
   for (const id of ["r-name", "r-fw", "r-connect", "r-services", "r-mode"]) $(id).textContent = "–";
   $("log").textContent = "Waiting.";
   t0 = 0;
-  report = { tool: "X-T50 Link Test", version: 7, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
+  report = { tool: "X-T50 Link Test", version: 8, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
   const optionalServices = Object.keys(SVC);
   setState("busy", "Choose the camera in the list");
   try {
