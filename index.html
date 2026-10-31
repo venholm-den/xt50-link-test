@@ -69,7 +69,7 @@ dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap:
 <body>
 <main>
   <header>
-    <span class="tag">Read-only until you register</span>
+    <span class="tag">Read-only until you register · v3</span>
     <h1>X-T50 Link Test</h1>
     <p class="sub">Checks whether this phone can open a Bluetooth connection to the camera and see its pairing services. Finding and connecting only reads from the camera. Registering is a separate step that you confirm first.</p>
   </header>
@@ -285,7 +285,7 @@ async function find() {
   for (const id of ["r-name", "r-fw", "r-connect", "r-services", "r-mode"]) $(id).textContent = "–";
   $("log").textContent = "Waiting.";
   t0 = 0;
-  report = { tool: "X-T50 Link Test", read_only: true, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
+  report = { tool: "X-T50 Link Test", version: 3, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
   const optionalServices = Object.keys(SVC);
   setState("busy", "Choose the camera in the list");
   try {
