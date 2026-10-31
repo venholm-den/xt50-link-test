@@ -60,6 +60,13 @@ dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap:
 .svc code, .log { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .svc .chars { color: var(--faint); font-size: 12px; }
 .log { margin: 0; white-space: pre-wrap; max-height: 260px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px; }
+.field { display: grid; gap: 6px; font-size: 14px; }
+.field em { color: var(--faint); font-style: normal; }
+.field input { font: 15px var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 10px 12px; width: 100%; }
+.field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.field small { color: var(--faint); font-size: 12px; }
+.field small[data-ok="1"] { color: var(--live); }
+.field small[data-ok="0"] { color: var(--danger); }
 .note, .confirm p { margin: 0; font-size: 14px; color: var(--muted); }
 .confirm { display: grid; gap: 10px; }
 .confirm strong { color: var(--text); }
@@ -69,7 +76,7 @@ dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap:
 <body>
 <main>
   <header>
-    <span class="tag">Read-only until you register · v4</span>
+    <span class="tag">Read-only until you register · v5</span>
     <h1>X-T50 Link Test</h1>
     <p class="sub">Checks whether this phone can open a Bluetooth connection to the camera and see its pairing services. Finding and connecting only reads from the camera. Registering is a separate step that you confirm first.</p>
   </header>
@@ -86,6 +93,11 @@ dd { margin: 0; font-variant-numeric: tabular-nums; min-width: 0; overflow-wrap:
       <li>On the camera, open <strong>Pairing Registration</strong>.</li>
       <li>Tap <strong>Find camera</strong> and pick the X-T50 from the list.</li>
     </ol>
+    <label class="field" for="code">
+      <span>Pairing code from nRF Connect <em>(only needed to register)</em></span>
+      <input id="code" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. 0x02A1B2C3D4…">
+      <small id="code-hint">Bluefy can't read the code from the camera's broadcast. In nRF Connect's scanner, tap the X-T50 row without connecting and copy the Manufacturer data value, then paste it here. Don't paste it in chat.</small>
+    </label>
   </section>
 
   <section aria-live="polite">
@@ -232,12 +244,30 @@ function captureToken(dev) {
   });
 }
 
+// Accepts the manufacturer data as nRF Connect shows it (0x02 + 4-byte code + ...), with or
+// without the D804 company id in front, or just the 8 hex digits of the code.
+function parseCode(text) {
+  let hex = text.replace(/0x/gi, "").replace(/[^0-9a-f]/gi, "").toLowerCase();
+  if (hex.startsWith("d804") && hex.length >= 14) hex = hex.slice(4);
+  if (hex.length >= 10 && hex.startsWith("02")) hex = hex.slice(2, 10);
+  if (hex.length !== 8) return null;
+  return new Uint8Array(hex.match(/../g).map(h => parseInt(h, 16)));
+}
+function codeChanged() {
+  const text = $("code").value.trim();
+  const hint = $("code-hint");
+  if (!text) { delete hint.dataset.ok; return; }
+  const ok = !!parseCode(text);
+  hint.dataset.ok = ok ? "1" : "0";
+  hint.textContent = ok ? "Code looks right. Now tap Find camera." : "That doesn't look like the Fujifilm manufacturer data. It should start with 0x02 (or D8 04 02).";
+}
+
 function showRegistration(legacy, secure) {
   $("reg").hidden = false; $("reg-confirm").hidden = true; $("reg-start-row").hidden = false;
   const ready = legacy && token;
   $("reg-start").disabled = !ready;
-  $("reg-text").textContent = ready ? "The camera is in Pairing Registration and sent its pairing code. You can register this phone."
-    : legacy ? "The camera's pairing code wasn't picked up. Check that Pairing Registration is open on the camera, then tap Find camera again."
+  $("reg-text").textContent = ready ? "The pairing code is ready. You can register this phone."
+    : legacy ? "No pairing code yet. Paste it from nRF Connect into the field above, then tap Find camera again while Pairing Registration is still open."
     : secure ? "This camera asked for secure pairing, which this page doesn't support yet."
     : "No pairing service was found, so this phone can't register.";
 }
@@ -255,6 +285,7 @@ async function register() {
     log("Sending the pairing code.");
     await withTimeout(write(await pair.getCharacteristic(PAIR_TOKEN), token), 10000, "Pairing code write");
     token = null;
+    $("code").value = ""; codeChanged();
     log("Sending the name Fuji Companion Lab.");
     await withTimeout(write(await pair.getCharacteristic(CLIENT_NAME), new TextEncoder().encode("Fuji Companion Lab")), 10000, "Name write");
     try {
@@ -305,7 +336,7 @@ async function find() {
   for (const id of ["r-name", "r-fw", "r-connect", "r-services", "r-mode"]) $(id).textContent = "–";
   $("log").textContent = "Waiting.";
   t0 = 0;
-  report = { tool: "X-T50 Link Test", version: 4, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
+  report = { tool: "X-T50 Link Test", version: 5, browser: navigator.userAgent, started: new Date().toISOString(), timeline: [] };
   const optionalServices = Object.keys(SVC);
   setState("busy", "Choose the camera in the list");
   try {
@@ -332,6 +363,11 @@ async function find() {
   token = await captureToken(device);
   report.pairing_code_seen = !!token;
   log(token ? "Pairing code seen in the camera's broadcast." : "No pairing code seen in the camera's broadcast.");
+  if (!token && $("code").value.trim()) {
+    token = parseCode($("code").value.trim());
+    report.pairing_code_entered = !!token;
+    log(token ? "Using the pairing code you entered." : "The pairing code you entered isn't valid.");
+  }
   device.addEventListener("gattserverdisconnected", () => {
     log("Camera link dropped.");
     if ($("state").dataset.s !== "fail") setState("idle", "Disconnected");
@@ -423,6 +459,7 @@ $("copy").addEventListener("click", copy);
 $("reg-start").addEventListener("click", () => { $("reg-start-row").hidden = true; $("reg-confirm").hidden = false; });
 $("reg-cancel").addEventListener("click", () => { $("reg-confirm").hidden = true; $("reg-start-row").hidden = false; });
 $("reg-send").addEventListener("click", register);
+$("code").addEventListener("input", codeChanged);
 checkSupport();
 </script>
 </body>
